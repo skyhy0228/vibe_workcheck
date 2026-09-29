@@ -8,4 +8,6 @@ data/database/*.db-*
 data/submissions/
 firebase-service-account*.json
 serviceAccountKey*.json
+*firebase-adminsdk*.json
+*.service-account.json
 npm-debug.log*
