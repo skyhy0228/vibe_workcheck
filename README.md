@@ -80,10 +80,23 @@ Firestore Database
 Storage
 ```
 
+GitHub 저장소에서 Pages를 먼저 켜야 Actions 배포가 성공합니다.
+
+```text
+GitHub 저장소 > Settings > Pages
+Source: GitHub Actions
+```
+
 초기 관리자, 학생, 기본 과제를 Firebase에 넣으려면 로컬에서 실행합니다.
 
 ```bash
 npm run firebase:seed
+```
+
+Firestore/Storage 보안 규칙은 Firebase CLI 로그인 후 아래 명령으로 배포합니다.
+
+```bash
+npm run firebase:deploy-rules
 ```
 
 서비스 계정 JSON 파일은 저장소 루트에 둘 수 있지만 GitHub에 올라가지 않도록 `.gitignore`에 포함되어 있습니다.

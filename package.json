@@ -11,7 +11,8 @@
     "seed": "npm run seed --prefix server",
     "smoke": "node scripts/smoke-test.mjs",
     "smoke:features": "node scripts/feature-smoke.mjs",
-    "firebase:seed": "node scripts/firebase-seed.mjs"
+    "firebase:seed": "node scripts/firebase-seed.mjs",
+    "firebase:deploy-rules": "npx firebase-tools@13 deploy --only firestore:rules,storage"
   },
   "devDependencies": {
     "concurrently": "^9.0.1",
