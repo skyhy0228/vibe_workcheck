@@ -1,15 +1,13 @@
-import { firebaseAdminFileUrl, firebaseApi, firebaseFileUrl } from "./firebaseApi.js";
 import { localAdminFileUrl, localApi, localFileUrl } from "./localApi.js";
 
-export const isFirebaseMode = import.meta.env.VITE_DATA_BACKEND === "firebase";
-export const api = isFirebaseMode ? firebaseApi : localApi;
+export const api = localApi;
 
 export function fileUrl(submissionId, file = "archive") {
-  return isFirebaseMode ? firebaseFileUrl(submissionId, file) : localFileUrl(submissionId, file);
+  return localFileUrl(submissionId, file);
 }
 
 export function adminFileUrl(path) {
-  return isFirebaseMode ? firebaseAdminFileUrl(path) : localAdminFileUrl(path);
+  return localAdminFileUrl(path);
 }
 
 export function formatDate(value) {

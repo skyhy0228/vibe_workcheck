@@ -25,8 +25,7 @@ import {
   Upload,
   Users
 } from "lucide-react";
-import { adminFileUrl, api, fileUrl, formatBytes, formatDate, isFirebaseMode, statusLabel } from "./services/api.js";
-import { downloadCsvFromRows, downloadZipFromRows } from "./services/firebaseApi.js";
+import { adminFileUrl, api, fileUrl, formatBytes, formatDate, statusLabel } from "./services/api.js";
 
 const RouterContext = createContext(null);
 const useHashRouter = import.meta.env.VITE_ROUTER_MODE === "hash";
@@ -111,7 +110,7 @@ function Brand({ compact = false }) {
 
 function LoginPage({ setUser, showToast }) {
   const { navigate } = useRouter();
-  const [form, setForm] = useState({ loginId: "2126055", password: "2126055" });
+  const [form, setForm] = useState({ loginId: "", password: "" });
   const [busy, setBusy] = useState(false);
 
   const login = async (event) => {
@@ -262,10 +261,54 @@ function StatCard({ icon, label, value, tone = "" }) {
   );
 }
 
+function getArchiveExtension(filename = "") {
+  const lower = filename.toLowerCase();
+  if (lower.endsWith(".tar.gz")) return ".tar.gz";
+  return lower.includes(".") ? lower.slice(lower.lastIndexOf(".")) : "";
+}
+
+function timeLeftText(value) {
+  if (!value) return "-";
+  const diff = new Date(value).getTime() - Date.now();
+  if (diff <= 0) return "마감됨";
+  const minutes = Math.floor(diff / 60000);
+  const days = Math.floor(minutes / 1440);
+  const hours = Math.floor((minutes % 1440) / 60);
+  const mins = minutes % 60;
+  if (days > 0) return `${days}일 ${hours}시간 남음`;
+  if (hours > 0) return `${hours}시간 ${mins}분 남음`;
+  return `${mins}분 남음`;
+}
+
+function submissionStatus(item) {
+  if (!item) return "missing";
+  if (item.is_late) return "late";
+  if (item.version > 1) return "resubmitted";
+  return "submitted";
+}
+
+async function copyText(text) {
+  if (navigator.clipboard?.writeText) {
+    await navigator.clipboard.writeText(text);
+    return true;
+  }
+  const area = document.createElement("textarea");
+  area.value = text;
+  area.style.position = "fixed";
+  area.style.left = "-9999px";
+  document.body.appendChild(area);
+  area.select();
+  const ok = document.execCommand("copy");
+  area.remove();
+  return ok;
+}
+
 function StudentDashboard({ user }) {
   const [assignments, setAssignments] = useState([]);
   const [notices, setNotices] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [query, setQuery] = useState("");
+  const [filter, setFilter] = useState("all");
   useEffect(() => {
     Promise.all([api.get("/assignments"), api.get("/notices")])
       .then(([assignmentRes, noticeRes]) => {
@@ -279,11 +322,22 @@ function StudentDashboard({ user }) {
     const total = assignments.length;
     const submitted = assignments.filter((a) => a.latest_submission).length;
     const urgent = assignments.filter((a) => {
-      const left = new Date(a.due_at).getTime() - Date.now();
+      const left = new Date(a.effective_due_at || a.due_at).getTime() - Date.now();
       return left > 0 && left < 3 * 24 * 60 * 60 * 1000;
     }).length;
     return { total, submitted, missing: total - submitted, urgent };
   }, [assignments]);
+
+  const filteredAssignments = useMemo(() => assignments.filter((item) => {
+    const status = item.latest_submission ? submissionStatus(item.latest_submission) : item.is_closed ? "closed" : "missing";
+    const text = `${item.title} ${item.description || ""}`.toLowerCase();
+    const matchesQuery = text.includes(query.trim().toLowerCase());
+    const matchesFilter = filter === "all"
+      || status === filter
+      || (filter === "urgent" && !item.latest_submission && !item.is_closed && new Date(item.effective_due_at || item.due_at).getTime() - Date.now() < 3 * 24 * 60 * 60 * 1000)
+      || (filter === "revision" && item.latest_submission?.revision_requested);
+    return matchesQuery && matchesFilter;
+  }), [assignments, filter, query]);
 
   return (
     <main className="grid-page">
@@ -313,25 +367,37 @@ function StudentDashboard({ user }) {
         </section>
       )}
       <section className="panel">
-        <div className="panel-head"><h2>과제 목록</h2><small>{loading ? "불러오는 중" : `${assignments.length}개 과제`}</small></div>
+        <div className="panel-head"><h2>과제 목록</h2><small>{loading ? "불러오는 중" : `${filteredAssignments.length} / ${assignments.length}개 과제`}</small></div>
+        <div className="toolbar">
+          <div className="search"><Search size={17} /><input placeholder="과제명 또는 설명 검색" value={query} onChange={(e) => setQuery(e.target.value)} /></div>
+          <select value={filter} onChange={(e) => setFilter(e.target.value)}>
+            <option value="all">전체</option>
+            <option value="missing">미제출</option>
+            <option value="submitted">제출 완료</option>
+            <option value="resubmitted">재제출</option>
+            <option value="urgent">마감 임박</option>
+            <option value="revision">수정 요청</option>
+            <option value="closed">제출 마감</option>
+          </select>
+        </div>
         <div className="table-wrap">
           <table>
-            <thead><tr><th>과제명</th><th>마감일</th><th>상태</th><th>최근 제출</th><th>기능</th></tr></thead>
+            <thead><tr><th>과제명</th><th>마감일</th><th>남은 시간</th><th>상태</th><th>최근 제출</th><th>기능</th></tr></thead>
             <tbody>
-              {assignments.map((item) => {
-                const status = item.latest_submission
-                  ? item.latest_submission.is_late ? "late" : item.latest_submission.version > 1 ? "resubmitted" : "submitted"
-                  : item.is_closed ? "closed" : "missing";
+              {filteredAssignments.map((item) => {
+                const status = item.latest_submission ? submissionStatus(item.latest_submission) : item.is_closed ? "closed" : "missing";
                 return (
                   <tr key={item.id}>
                     <td><strong>{item.title}</strong><small>{item.allowed_extensions.join(", ")}</small></td>
-                    <td>{formatDate(item.due_at)}</td>
+                    <td>{formatDate(item.effective_due_at || item.due_at)}</td>
+                    <td>{timeLeftText(item.effective_due_at || item.due_at)}</td>
                     <td><span className={`badge ${status}`}>{statusLabel(status)}</span></td>
                     <td>{item.latest_submission ? formatDate(item.latest_submission.submitted_at) : "-"}</td>
                     <td><Link className="mini-btn" to={`/student/assignments/${item.id}`}>상세보기</Link></td>
                   </tr>
                 );
               })}
+              {filteredAssignments.length === 0 && <tr><td colSpan="6" className="empty">조건에 맞는 과제가 없습니다.</td></tr>}
             </tbody>
           </table>
         </div>
@@ -351,6 +417,7 @@ function AssignmentDetail({ showToast, id, user }) {
   const [archive, setArchive] = useState(null);
   const [readme, setReadme] = useState(null);
   const [progress, setProgress] = useState(0);
+  const [receipt, setReceipt] = useState(null);
   const fileInput = useRef(null);
 
   const load = async () => {
@@ -381,10 +448,11 @@ function AssignmentDetail({ showToast, id, user }) {
     formData.append("archive", archive);
     if (readme) formData.append("readme", readme);
     try {
-      await api.post(`/assignments/${id}/submissions`, formData, {
+      const { data } = await api.post(`/assignments/${id}/submissions`, formData, {
         headers: { "Content-Type": "multipart/form-data" },
         onUploadProgress: (event) => setProgress(Math.round((event.loaded / event.total) * 100))
       });
+      setReceipt(data.submission);
       setArchive(null);
       setReadme(null);
       setProgress(0);
@@ -423,24 +491,45 @@ function AssignmentDetail({ showToast, id, user }) {
     }
   };
 
-  const downloadReadmeTemplate = async (event) => {
-    if (!isFirebaseMode) return;
-    event.preventDefault();
-    const { data } = await api.get(`/assignments/${id}/readme-template`);
-    const url = URL.createObjectURL(new Blob([data], { type: "text/plain;charset=utf-8" }));
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = "README.txt";
-    document.body.appendChild(a);
-    a.click();
-    a.remove();
-    URL.revokeObjectURL(url);
-  };
-
   if (!assignment) return <div className="loading">과제 정보를 불러오는 중...</div>;
+  const now = Date.now();
   const closed = assignment.is_closed;
+  const beforeOpen = now < new Date(assignment.open_at).getTime();
   const latest = submissions[0];
   const filenameWarning = archive && !archive.name.includes(user.studentNumber);
+  const submitChecks = [
+    {
+      label: "압축파일 선택",
+      ok: Boolean(archive),
+      detail: archive ? archive.name : "제출할 압축파일을 선택하세요."
+    },
+    {
+      label: "허용 확장자",
+      ok: Boolean(archive && assignment.allowed_extensions.includes(getArchiveExtension(archive.name))),
+      detail: archive ? `${getArchiveExtension(archive.name) || "확장자 없음"} / 허용: ${assignment.allowed_extensions.join(", ")}` : "파일 선택 후 자동 확인"
+    },
+    {
+      label: "파일 용량",
+      ok: Boolean(archive && archive.size > 0 && archive.size <= assignment.max_file_size),
+      detail: archive ? `${formatBytes(archive.size)} / 최대 ${formatBytes(assignment.max_file_size)}` : "최대 용량 자동 확인"
+    },
+    {
+      label: "파일명 학번 포함",
+      ok: Boolean(archive && archive.name.includes(user.studentNumber)),
+      detail: archive ? (archive.name.includes(user.studentNumber) ? "권장 형식 충족" : `${user.studentNumber} 포함 권장`) : "파일명에 학번 포함 권장"
+    },
+    {
+      label: "README.txt",
+      ok: !readme || readme.name.toLowerCase().endsWith(".txt"),
+      detail: readme ? `${readme.name} 선택됨` : "선택 제출"
+    },
+    {
+      label: "제출 기간",
+      ok: !closed && !beforeOpen,
+      detail: beforeOpen ? "아직 제출 시작 전" : closed ? "제출 마감" : timeLeftText(assignment.effective_due_at || assignment.due_at)
+    }
+  ];
+  const canSubmit = submitChecks.every((check) => check.ok || check.label === "파일명 학번 포함");
 
   return (
     <main className="grid-page">
@@ -453,14 +542,16 @@ function AssignmentDetail({ showToast, id, user }) {
           <p className="description">{assignment.description}</p>
           <dl className="meta-grid">
             <div><dt>제출 시작</dt><dd>{formatDate(assignment.open_at)}</dd></div>
-            <div><dt>마감</dt><dd>{formatDate(assignment.due_at)}</dd></div>
+            <div><dt>마감</dt><dd>{formatDate(assignment.effective_due_at || assignment.due_at)}</dd></div>
             <div><dt>지각 제출</dt><dd>{assignment.allow_late ? "허용" : "미허용"}</dd></div>
             <div><dt>최대 용량</dt><dd>{formatBytes(assignment.max_file_size)}</dd></div>
+            <div><dt>남은 시간</dt><dd>{timeLeftText(assignment.effective_due_at || assignment.due_at)}</dd></div>
+            <div><dt>제출 버전</dt><dd>{latest ? `v${latest.version}` : "아직 없음"}</dd></div>
           </dl>
         </article>
         <article className="panel upload-panel">
           <h2>과제 제출</h2>
-          <a className="mini-btn" href={`/api/assignments/${id}/readme-template`} onClick={downloadReadmeTemplate}><Download size={15} /> README 템플릿</a>
+          <a className="mini-btn" href={`/api/assignments/${id}/readme-template`}><Download size={15} /> README 템플릿</a>
           <div
             className={`drop-zone ${archive ? "ready" : ""}`}
             onClick={() => fileInput.current?.click()}
@@ -468,6 +559,7 @@ function AssignmentDetail({ showToast, id, user }) {
             onDrop={(e) => {
               e.preventDefault();
               setArchive(e.dataTransfer.files?.[0] || null);
+              setReceipt(null);
             }}
           >
             <FileArchive size={34} />
@@ -476,16 +568,36 @@ function AssignmentDetail({ showToast, id, user }) {
             {archive && <small>{formatBytes(archive.size)}</small>}
           </div>
           {filenameWarning && <div className="inline-warning"><FileText size={17} /> 파일명에 학번이 없어요. 권장 형식: 학번_이름_과제명.zip</div>}
-          <input ref={fileInput} type="file" hidden onChange={(e) => setArchive(e.target.files?.[0] || null)} />
+          <input ref={fileInput} type="file" hidden accept={assignment.allowed_extensions.join(",")} onChange={(e) => { setArchive(e.target.files?.[0] || null); setReceipt(null); }} />
           <label className="readme-picker">
             <FileText size={18} />
             <span>{readme ? readme.name : "README.txt 선택 첨부"}</span>
-            <input type="file" accept=".txt,text/plain" onChange={(e) => setReadme(e.target.files?.[0] || null)} />
+            <input type="file" accept=".txt,text/plain" onChange={(e) => { setReadme(e.target.files?.[0] || null); setReceipt(null); }} />
           </label>
+          <div className="checklist">
+            {submitChecks.map((check) => (
+              <div key={check.label} className={check.ok ? "ok" : "warn"}>
+                <CheckCircle2 size={16} />
+                <strong>{check.label}</strong>
+                <small>{check.detail}</small>
+              </div>
+            ))}
+          </div>
           {progress > 0 && <div className="progress"><span style={{ width: `${progress}%` }} /></div>}
-          <button className="primary" onClick={submit} disabled={closed}>제출하기</button>
+          <button className="primary" onClick={submit} disabled={!canSubmit}>제출하기</button>
         </article>
       </section>
+      {receipt && (
+        <section className="panel receipt-panel">
+          <div className="panel-head"><h2><CheckCircle2 size={21} /> 제출 완료증</h2><span className="badge submitted">v{receipt.version}</span></div>
+          <dl className="meta-grid">
+            <div><dt>제출번호</dt><dd>#{receipt.id}</dd></div>
+            <div><dt>제출시간</dt><dd>{formatDate(receipt.submitted_at)}</dd></div>
+            <div><dt>압축파일</dt><dd>{receipt.original_filename}</dd></div>
+            <div><dt>파일 해시</dt><dd className="hash-text">{receipt.file_hash || "-"}</dd></div>
+          </dl>
+        </section>
+      )}
       {latest && (latest.score != null || latest.professor_feedback || latest.revision_requested) && (
         <section className="panel feedback-panel">
           <div className="panel-head"><h2><Star size={21} /> 교수 피드백</h2><span className="badge submitted">{latest.score != null ? `${latest.score}점` : latest.grade_status}</span></div>
@@ -589,6 +701,7 @@ function ProfessorDashboard({ showToast }) {
   const [assignments, setAssignments] = useState([]);
   const [notices, setNotices] = useState([]);
   const [noticeForm, setNoticeForm] = useState({ title: "", body: "", pinned: true });
+  const [editingNoticeId, setEditingNoticeId] = useState(null);
   const [form, setForm] = useState(null);
 
   const load = async () => {
@@ -620,13 +733,25 @@ function ProfessorDashboard({ showToast }) {
 
   const saveNotice = async () => {
     try {
-      await api.post("/admin/notices", noticeForm);
+      if (editingNoticeId) await api.put(`/admin/notices/${editingNoticeId}`, noticeForm);
+      else await api.post("/admin/notices", noticeForm);
       setNoticeForm({ title: "", body: "", pinned: true });
-      showToast("공지가 등록되었습니다.", "success");
+      setEditingNoticeId(null);
+      showToast(editingNoticeId ? "공지가 수정되었습니다." : "공지가 등록되었습니다.", "success");
       load();
     } catch (error) {
-      showToast(error.response?.data?.message || "공지 등록에 실패했습니다.", "error");
+      showToast(error.response?.data?.message || "공지 저장에 실패했습니다.", "error");
     }
+  };
+
+  const editNotice = (notice) => {
+    setEditingNoticeId(notice.id);
+    setNoticeForm({ title: notice.title, body: notice.body, pinned: Boolean(notice.pinned) });
+  };
+
+  const cancelNoticeEdit = () => {
+    setEditingNoticeId(null);
+    setNoticeForm({ title: "", body: "", pinned: true });
   };
 
   const deleteNotice = async (id) => {
@@ -650,14 +775,18 @@ function ProfessorDashboard({ showToast }) {
           <input placeholder="공지 제목" value={noticeForm.title} onChange={(e) => setNoticeForm({ ...noticeForm, title: e.target.value })} />
           <textarea rows="3" placeholder="공지 내용" value={noticeForm.body} onChange={(e) => setNoticeForm({ ...noticeForm, body: e.target.value })} />
           <label className="check"><input type="checkbox" checked={noticeForm.pinned} onChange={(e) => setNoticeForm({ ...noticeForm, pinned: e.target.checked })} /> 중요 공지</label>
-          <button className="primary compact-btn" onClick={saveNotice}>공지 등록</button>
+          {editingNoticeId && <button className="secondary compact-btn" onClick={cancelNoticeEdit}>수정 취소</button>}
+          <button className="primary compact-btn" onClick={saveNotice}>{editingNoticeId ? "공지 수정" : "공지 등록"}</button>
         </div>
         <div className="notice-list">
           {notices.slice(0, 4).map((notice) => (
             <article key={notice.id}>
               <strong>{notice.pinned ? "[중요] " : ""}{notice.title}</strong>
               <p>{notice.body}</p>
-              <button className="mini-btn" onClick={() => deleteNotice(notice.id)}>삭제</button>
+              <div className="card-actions">
+                <button className="mini-btn" onClick={() => editNotice(notice)}>수정</button>
+                <button className="mini-btn" onClick={() => deleteNotice(notice.id)}>삭제</button>
+              </div>
             </article>
           ))}
         </div>
@@ -705,6 +834,19 @@ function ReviewModal({ row, onClose, onSaved, showToast }) {
     privateNote: submission?.private_note || "",
     revisionRequested: Boolean(submission?.revision_requested)
   });
+  const [comments, setComments] = useState([]);
+  const [commentBody, setCommentBody] = useState("");
+  const [commentVisibility, setCommentVisibility] = useState("shared");
+  const [readmePreview, setReadmePreview] = useState(null);
+
+  const loadComments = async () => {
+    const { data } = await api.get(`/submissions/${submission.id}/comments`);
+    setComments(data.comments);
+  };
+
+  useEffect(() => {
+    loadComments().catch(() => {});
+  }, [submission.id]);
 
   const save = async () => {
     try {
@@ -716,10 +858,32 @@ function ReviewModal({ row, onClose, onSaved, showToast }) {
     }
   };
 
+  const addComment = async () => {
+    if (!commentBody.trim()) return showToast("댓글 내용을 입력해주세요.", "error");
+    await api.post(`/submissions/${submission.id}/comments`, { body: commentBody, visibility: commentVisibility });
+    setCommentBody("");
+    await loadComments();
+  };
+
+  const previewReadme = async () => {
+    try {
+      const { data } = await api.get(`/submissions/${submission.id}/readme`, { responseType: "text" });
+      setReadmePreview(data);
+    } catch (error) {
+      showToast(error.response?.data?.message || "README 미리보기를 불러오지 못했습니다.", "error");
+    }
+  };
+
   return (
     <div className="modal-backdrop">
       <div className="modal">
         <h2>{row.student.name} 제출물 검토</h2>
+        <div className="review-file-row">
+          <a className="mini-btn" href={submission.download_url || fileUrl(submission.id)}><Download size={15} /> 압축파일</a>
+          {submission.readme_original_filename && <a className="mini-btn" href={submission.readme_download_url || fileUrl(submission.id, "readme")}><FileText size={15} /> README</a>}
+          {submission.readme_original_filename && <button className="mini-btn" onClick={previewReadme}><Eye size={15} /> README 미리보기</button>}
+        </div>
+        {readmePreview != null && <pre className="readme-preview">{readmePreview}</pre>}
         <div className="form-grid">
           <label>점수<input type="number" value={form.score} onChange={(e) => setForm({ ...form, score: e.target.value })} /></label>
           <label>검토 상태<select value={form.gradeStatus} onChange={(e) => setForm({ ...form, gradeStatus: e.target.value })}><option value="reviewed">검토 완료</option><option value="needs_revision">수정 필요</option><option value="excellent">우수</option></select></label>
@@ -727,6 +891,24 @@ function ReviewModal({ row, onClose, onSaved, showToast }) {
         <label>학생에게 보이는 피드백<textarea rows="4" value={form.feedback} onChange={(e) => setForm({ ...form, feedback: e.target.value })} /></label>
         <label>교수 비공개 메모<textarea rows="3" value={form.privateNote} onChange={(e) => setForm({ ...form, privateNote: e.target.value })} /></label>
         <label className="check"><input type="checkbox" checked={form.revisionRequested} onChange={(e) => setForm({ ...form, revisionRequested: e.target.checked })} /> 수정 요청 표시</label>
+        <div className="comment-list compact-list">
+          {comments.map((comment) => (
+            <article key={comment.id}>
+              <strong>{comment.name} {comment.visibility === "private" ? "(비공개)" : ""}</strong>
+              <p>{comment.body}</p>
+              <small>{formatDate(comment.created_at)}</small>
+            </article>
+          ))}
+          {comments.length === 0 && <p className="muted">아직 댓글이 없습니다.</p>}
+        </div>
+        <div className="comment-box">
+          <input placeholder="제출물 댓글" value={commentBody} onChange={(e) => setCommentBody(e.target.value)} />
+          <select value={commentVisibility} onChange={(e) => setCommentVisibility(e.target.value)}>
+            <option value="shared">학생 공개</option>
+            <option value="private">교수 비공개</option>
+          </select>
+          <button className="primary compact-btn" onClick={addComment}>댓글 등록</button>
+        </div>
         <div className="modal-actions"><button className="secondary" onClick={onClose}>닫기</button><button className="primary" onClick={save}>저장</button></div>
       </div>
     </div>
@@ -741,6 +923,8 @@ function AdminAssignmentStatus({ id, showToast }) {
   const [query, setQuery] = useState("");
   const [filter, setFilter] = useState("all");
   const [sort, setSort] = useState("student_number");
+  const [scoreDrafts, setScoreDrafts] = useState({});
+  const [readmePreview, setReadmePreview] = useState(null);
 
   const loadStatus = async () => {
     const [status, qnaRes] = await Promise.all([
@@ -748,6 +932,7 @@ function AdminAssignmentStatus({ id, showToast }) {
       api.get(`/assignments/${id}/qna`)
     ]);
     setData(status.data);
+    setScoreDrafts(Object.fromEntries(status.data.rows.filter((row) => row.submission).map((row) => [row.submission.id, row.submission.score ?? ""])));
     setQna(qnaRes.data.qna);
   };
 
@@ -773,26 +958,53 @@ function AdminAssignmentStatus({ id, showToast }) {
     setQna(qnaRes.data.qna);
   };
 
-  const downloadCsv = async (event) => {
-    if (!isFirebaseMode) return;
-    event.preventDefault();
-    await downloadCsvFromRows(data.assignment, rows);
+  const copyMissing = async () => {
+    const missing = (data?.rows || []).filter((row) => !row.submission);
+    const text = missing.map((row) => `${row.student.student_number}\t${row.student.name}`).join("\n");
+    if (!text) return showToast("미제출자가 없습니다.", "success");
+    const copied = await copyText(text);
+    showToast(copied ? `미제출자 ${missing.length}명을 클립보드에 복사했습니다.` : "브라우저가 클립보드 복사를 막았습니다.", copied ? "success" : "error");
   };
 
-  const downloadZip = async (event) => {
-    if (!isFirebaseMode) return;
-    event.preventDefault();
-    showToast("전체 제출 파일 ZIP을 생성하는 중입니다.", "info");
-    await downloadZipFromRows(data.assignment, rows);
+  const saveScores = async () => {
+    const targets = (data?.rows || []).filter((row) => row.submission && String(scoreDrafts[row.submission.id] ?? "") !== String(row.submission.score ?? ""));
+    if (targets.length === 0) return showToast("변경된 점수가 없습니다.", "info");
+    await Promise.all(targets.map((row) => api.put(`/admin/submissions/${row.submission.id}/review`, {
+      score: scoreDrafts[row.submission.id],
+      gradeStatus: row.submission.grade_status || "reviewed",
+      feedback: row.submission.professor_feedback || "",
+      privateNote: row.submission.private_note || "",
+      revisionRequested: Boolean(row.submission.revision_requested)
+    })));
+    showToast(`점수 ${targets.length}건을 저장했습니다.`, "success");
+    await loadStatus();
+  };
+
+  const previewReadme = async (submission) => {
+    try {
+      const { data: text } = await api.get(`/submissions/${submission.id}/readme`, { responseType: "text" });
+      setReadmePreview({ submission, text });
+    } catch (error) {
+      showToast(error.response?.data?.message || "README 미리보기를 불러오지 못했습니다.", "error");
+    }
   };
 
   const rows = useMemo(() => {
     const list = data?.rows || [];
     return list
-      .filter((row) => filter === "all" || row.status === filter)
+      .filter((row) => {
+        if (filter === "all") return true;
+        if (filter === "unreviewed") return row.submission && row.submission.grade_status === "unreviewed";
+        if (filter === "reviewed") return row.submission && row.submission.grade_status !== "unreviewed";
+        if (filter === "revision") return row.submission?.revision_requested;
+        if (filter === "readme") return row.submission?.readme_original_filename;
+        if (filter === "no_readme") return row.submission && !row.submission.readme_original_filename;
+        return row.status === filter;
+      })
       .filter((row) => `${row.student.student_number} ${row.student.name}`.includes(query))
       .sort((a, b) => {
         if (sort === "submitted_at") return String(b.submission?.submitted_at || "").localeCompare(String(a.submission?.submitted_at || ""));
+        if (sort === "score") return Number(b.submission?.score ?? -1) - Number(a.submission?.score ?? -1);
         if (sort === "status") return a.status.localeCompare(b.status);
         return String(a.student[sort] || "").localeCompare(String(b.student[sort] || ""));
       });
@@ -801,6 +1013,13 @@ function AdminAssignmentStatus({ id, showToast }) {
   if (!data) return <div className="loading">제출 현황을 불러오는 중...</div>;
   const submitted = data.rows.filter((r) => r.submission).length;
   const percent = data.rows.length ? Math.round((submitted / data.rows.length) * 100) : 0;
+  const counts = {
+    missing: data.rows.filter((r) => !r.submission).length,
+    late: data.rows.filter((r) => r.submission?.is_late).length,
+    unreviewed: data.rows.filter((r) => r.submission && r.submission.grade_status === "unreviewed").length,
+    revision: data.rows.filter((r) => r.submission?.revision_requested).length,
+    readme: data.rows.filter((r) => r.submission?.readme_original_filename).length
+  };
 
   return (
     <main className="grid-page">
@@ -816,6 +1035,13 @@ function AdminAssignmentStatus({ id, showToast }) {
           <div className="progress"><span style={{ width: `${percent}%` }} /></div>
         </div>
       </section>
+      <section className="stats-row assignment-stats">
+        <StatCard icon={<Archive />} label="미제출" value={counts.missing} tone="orange" />
+        <StatCard icon={<Clock />} label="지각 제출" value={counts.late} />
+        <StatCard icon={<Eye />} label="미검토" value={counts.unreviewed} tone="blue" />
+        <StatCard icon={<RefreshCcw />} label="수정 요청" value={counts.revision} tone="orange" />
+        <StatCard icon={<FileText />} label="README 있음" value={counts.readme} tone="green" />
+      </section>
       <section className="panel">
         <div className="toolbar">
           <div className="search"><Search size={17} /><input placeholder="이름 또는 학번 검색" value={query} onChange={(e) => setQuery(e.target.value)} /></div>
@@ -824,15 +1050,23 @@ function AdminAssignmentStatus({ id, showToast }) {
             <option value="submitted">제출 완료</option>
             <option value="missing">미제출</option>
             <option value="late">지각 제출</option>
+            <option value="unreviewed">미검토</option>
+            <option value="reviewed">검토 완료</option>
+            <option value="revision">수정 요청</option>
+            <option value="readme">README 있음</option>
+            <option value="no_readme">README 없음</option>
           </select>
           <select value={sort} onChange={(e) => setSort(e.target.value)}>
             <option value="student_number">학번순</option>
             <option value="name">이름순</option>
             <option value="submitted_at">제출시간순</option>
             <option value="status">상태순</option>
+            <option value="score">점수순</option>
           </select>
-          <a className="secondary compact-btn" href={adminFileUrl(`/assignments/${id}/submissions.csv`)} onClick={downloadCsv}>CSV</a>
-          <a className="primary compact-btn" href={adminFileUrl(`/assignments/${id}/download-all`)} onClick={downloadZip}><Download size={17} /> 전체 ZIP</a>
+          <button className="secondary compact-btn" onClick={copyMissing}>미제출자 복사</button>
+          <button className="secondary compact-btn" onClick={saveScores}>점수 일괄 저장</button>
+          <a className="secondary compact-btn" href={adminFileUrl(`/assignments/${id}/submissions.csv`)}>CSV</a>
+          <a className="primary compact-btn" href={adminFileUrl(`/assignments/${id}/download-all`)}><Download size={17} /> 전체 ZIP</a>
         </div>
         <div className="table-wrap">
           <table>
@@ -847,20 +1081,28 @@ function AdminAssignmentStatus({ id, showToast }) {
                   <td>{submission ? formatDate(submission.submitted_at) : "-"}</td>
                   <td>{submission?.original_filename || "-"}</td>
                   <td>{submission?.readme_original_filename || "-"}</td>
-                  <td>{submission?.score ?? "-"}</td>
+                  <td>{submission ? <input className="score-input" type="number" value={scoreDrafts[submission.id] ?? ""} onChange={(e) => setScoreDrafts({ ...scoreDrafts, [submission.id]: e.target.value })} /> : "-"}</td>
                   <td className="actions">
                     {submission && <a className="icon-btn" href={submission.download_url || fileUrl(submission.id)}><Download size={17} /></a>}
                     {submission?.readme_original_filename && <a className="icon-btn" href={submission.readme_download_url || fileUrl(submission.id, "readme")}><FileText size={17} /></a>}
+                    {submission?.readme_original_filename && <button className="icon-btn" onClick={() => previewReadme(submission)} title="README 미리보기"><Eye size={17} /></button>}
                     {submission && <button className="mini-btn" onClick={() => setReviewRow({ student, submission })}>검토</button>}
                     <button className="mini-btn" onClick={() => saveExtension(student.id)}><Clock size={14} /> 연장</button>
                     {extension && <button className="mini-btn" onClick={() => removeExtension(student.id)}>연장취소</button>}
                   </td>
                 </tr>
               ))}
+              {rows.length === 0 && <tr><td colSpan="9" className="empty">조건에 맞는 학생이 없습니다.</td></tr>}
             </tbody>
           </table>
         </div>
       </section>
+      {readmePreview && (
+        <section className="panel">
+          <div className="panel-head"><h2>{readmePreview.submission.student_name} README 미리보기</h2><button className="secondary compact-btn" onClick={() => setReadmePreview(null)}>닫기</button></div>
+          <pre className="readme-preview">{readmePreview.text}</pre>
+        </section>
+      )}
       <section className="panel">
         <div className="panel-head"><h2><MessageSquare size={21} /> 과제 Q&A 답변</h2></div>
         <div className="comment-box"><input placeholder="선택한 질문에 공통 답변을 남길 수 있습니다" value={answerBody} onChange={(e) => setAnswerBody(e.target.value)} /></div>
@@ -947,7 +1189,9 @@ function AdminToolsPage({ showToast }) {
 
   const resetSubmissions = async () => {
     if (!window.confirm("제출물과 제출 댓글, 개별 연장을 초기화합니다. 먼저 백업을 권장합니다. 계속할까요?")) return;
-    await api.delete("/admin/system/submissions");
+    const password = window.prompt("관리자 비밀번호를 다시 입력하세요.");
+    if (!password) return;
+    await api.delete("/admin/system/submissions", { data: { password } });
     showToast("제출 데이터가 초기화되었습니다.", "success");
     load();
   };

@@ -10,13 +10,10 @@
     "start": "npm run build && cross-env SERVE_CLIENT=true SERVER_PORT=228 node server/src/index.js",
     "seed": "npm run seed --prefix server",
     "smoke": "node scripts/smoke-test.mjs",
-    "smoke:features": "node scripts/feature-smoke.mjs",
-    "firebase:seed": "node scripts/firebase-seed.mjs",
-    "firebase:deploy-rules": "npx firebase-tools@13 deploy --only firestore:rules,storage"
+    "smoke:features": "node scripts/feature-smoke.mjs"
   },
   "devDependencies": {
     "concurrently": "^9.0.1",
-    "cross-env": "^7.0.3",
-    "firebase-admin": "^12.1.0"
+    "cross-env": "^7.0.3"
   }
 }

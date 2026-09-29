@@ -56,59 +56,17 @@ http://192.168.0.10:228
 npm start
 ```
 
-## GitHub Pages + Firebase 배포
+## 배포 방식
 
-이 저장소는 GitHub Pages 배포 워크플로우를 포함합니다.
+현재 버전은 로컬 Express/SQLite 서버로 실행합니다. GitHub Pages와 Firebase 배포 구성은 비활성화되어 있으며, 과제 제출 파일은 로컬 `data/submissions` 폴더에 저장됩니다.
 
-배포 주소:
-
-```text
-https://skyhy0228.github.io/vibe_workcheck/
-```
-
-GitHub Pages 배포본은 Express/SQLite 서버가 아니라 Firebase를 사용합니다.
-
-- Authentication: 로그인 계정
-- Firestore: 사용자, 과제, 제출 이력, 댓글, 공지
-- Storage: 제출 파일과 README.txt
-
-Firebase Console에서 아래 기능을 먼저 활성화해야 합니다.
-
-```text
-Authentication > Sign-in method > Email/Password
-Firestore Database
-Storage
-```
-
-GitHub 저장소에서 Pages를 먼저 켜야 Actions 배포가 성공합니다.
-
-```text
-GitHub 저장소 > Settings > Pages
-Source: GitHub Actions
-```
-
-초기 관리자, 학생, 기본 과제를 Firebase에 넣으려면 로컬에서 실행합니다.
+운영형 실행:
 
 ```bash
-npm run firebase:seed
+npm start
 ```
 
-Firestore/Storage 보안 규칙은 Firebase CLI 로그인 후 아래 명령으로 배포합니다.
-
-```bash
-npm run firebase:deploy-rules
-```
-
-서비스 계정 JSON 파일은 저장소 루트에 둘 수 있지만 GitHub에 올라가지 않도록 `.gitignore`에 포함되어 있습니다.
-
-Firebase 배포본에서도 화면 로그인은 아래와 같이 사용합니다.
-
-```text
-교수: admin / admin
-학생: 2026001 / 2026001
-```
-
-Firebase Authentication은 비밀번호 최소 6자 제한이 있어 내부 관리자 계정은 6자 이상 비밀번호로 생성하고, 화면에서는 `admin / admin` 입력을 유지하도록 처리했습니다.
+같은 네트워크의 다른 기기는 실행 시 출력되는 내부망 주소와 `228` 포트로 접속합니다.
 
 ## 기본 계정
 
@@ -222,14 +180,12 @@ F:\vibecoding\data\submissions\
 
 서버 시작 시 DB와 seed 데이터가 자동 생성됩니다.
 
-## Firebase 이전 시 변경 지점
+## 저장소 구조
 
-현재 구조는 이전을 고려해 영역을 분리했습니다.
+현재 구조는 아래 영역으로 분리되어 있습니다.
 
 - 인증: `server/src/middleware/auth.js`, `server/src/routes/authRoutes.js`
 - DB: `server/src/db.js`, `server/src/services/*`
 - 파일 저장: `server/src/services/submissionService.js`
 - API: `server/src/routes/*`
 - UI: `client/src`
-
-향후 이전 시 SQLite는 Firestore, 로컬 파일 시스템은 Firebase Storage, Express 인증은 Firebase Authentication 또는 Functions 기반 검증으로 교체하면 됩니다.

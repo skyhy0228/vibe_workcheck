@@ -122,6 +122,20 @@ adminRoutes.delete("/notices/:id", (req, res) => {
   res.json({ ok: Boolean(result.changes) });
 });
 
+adminRoutes.put("/notices/:id", (req, res) => {
+  const title = String(req.body.title || "").trim();
+  const body = String(req.body.body || "").trim();
+  if (!title || !body) return res.status(400).json({ message: "공지 제목과 내용을 입력해주세요." });
+  const result = db.prepare(`
+    UPDATE notices
+    SET title = ?, body = ?, pinned = ?, updated_at = ?
+    WHERE id = ?
+  `).run(title, body, req.body.pinned ? 1 : 0, new Date().toISOString(), req.params.id);
+  if (!result.changes) return res.status(404).json({ message: "공지를 찾을 수 없습니다." });
+  logAudit(req, "update_notice", "notice", req.params.id, title);
+  res.json({ notice: db.prepare("SELECT * FROM notices WHERE id = ?").get(req.params.id) });
+});
+
 adminRoutes.post("/assignments", (req, res, next) => {
   try {
     if (!req.body.title || !req.body.description || !req.body.open_at || !req.body.due_at) {
@@ -315,6 +329,10 @@ adminRoutes.get("/system/backup", (req, res, next) => {
 });
 
 adminRoutes.delete("/system/submissions", (req, res) => {
+  const password = String(req.body.password || "");
+  if (!password || !bcrypt.compareSync(password, req.user.password_hash)) {
+    return res.status(403).json({ message: "관리자 비밀번호를 확인해주세요." });
+  }
   db.transaction(() => {
     db.prepare("DELETE FROM submission_comments").run();
     db.prepare("DELETE FROM submissions").run();

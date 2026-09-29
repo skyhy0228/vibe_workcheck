@@ -1,9 +1,13 @@
 import fs from "node:fs";
+import path from "node:path";
 import { createRequire } from "node:module";
+import { fileURLToPath } from "node:url";
 
-const require = createRequire("F:/vibecoding/server/package.json");
+const projectRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
+const require = createRequire(path.join(projectRoot, "server", "package.json"));
 const Database = require("better-sqlite3");
 const baseUrl = process.env.SMOKE_BASE_URL || "http://127.0.0.1:228";
+const databasePath = path.join(projectRoot, "data", "database", "app.sqlite");
 
 async function json(response) {
   const data = await response.json().catch(() => ({}));
@@ -29,7 +33,10 @@ const assignments = await json(await fetch(`${baseUrl}/api/assignments`, {
   headers: { Cookie: student.cookie }
 }));
 
-const assignmentId = assignments.assignments[0].id;
+const assignment = assignments.assignments.find((item) => !item.is_closed && new Date(item.open_at).getTime() <= Date.now())
+  || assignments.assignments.find((item) => item.allow_late)
+  || assignments.assignments[0];
+const assignmentId = assignment.id;
 const form = new FormData();
 form.append("archive", new Blob(["sample archive content"], { type: "application/zip" }), "smoke_homework.zip");
 form.append("readme", new Blob(["Build: gcc main.c\nRun: ./a.exe"], { type: "text/plain" }), "README.txt");
@@ -73,7 +80,7 @@ console.log(JSON.stringify({
   zipStatus: zip.status
 }, null, 2));
 
-const db = new Database("F:/vibecoding/data/database/app.sqlite");
+const db = new Database(databasePath);
 const rows = db.prepare("SELECT stored_path, readme_stored_path FROM submissions WHERE original_filename = ?").all("smoke_homework.zip");
 for (const row of rows) {
   for (const filePath of [row.stored_path, row.readme_stored_path]) {
