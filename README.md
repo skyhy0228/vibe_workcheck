@@ -56,6 +56,47 @@ http://192.168.0.10:228
 npm start
 ```
 
+## GitHub Pages + Firebase 배포
+
+이 저장소는 GitHub Pages 배포 워크플로우를 포함합니다.
+
+배포 주소:
+
+```text
+https://skyhy0228.github.io/vibe_workcheck/
+```
+
+GitHub Pages 배포본은 Express/SQLite 서버가 아니라 Firebase를 사용합니다.
+
+- Authentication: 로그인 계정
+- Firestore: 사용자, 과제, 제출 이력, 댓글, 공지
+- Storage: 제출 파일과 README.txt
+
+Firebase Console에서 아래 기능을 먼저 활성화해야 합니다.
+
+```text
+Authentication > Sign-in method > Email/Password
+Firestore Database
+Storage
+```
+
+초기 관리자, 학생, 기본 과제를 Firebase에 넣으려면 로컬에서 실행합니다.
+
+```bash
+npm run firebase:seed
+```
+
+서비스 계정 JSON 파일은 저장소 루트에 둘 수 있지만 GitHub에 올라가지 않도록 `.gitignore`에 포함되어 있습니다.
+
+Firebase 배포본에서도 화면 로그인은 아래와 같이 사용합니다.
+
+```text
+교수: admin / admin
+학생: 2026001 / 2026001
+```
+
+Firebase Authentication은 비밀번호 최소 6자 제한이 있어 내부 관리자 계정은 6자 이상 비밀번호로 생성하고, 화면에서는 `admin / admin` 입력을 유지하도록 처리했습니다.
+
 ## 기본 계정
 
 교수:

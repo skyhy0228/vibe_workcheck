@@ -1,16 +1,15 @@
-import axios from "axios";
+import { firebaseAdminFileUrl, firebaseApi, firebaseFileUrl } from "./firebaseApi.js";
+import { localAdminFileUrl, localApi, localFileUrl } from "./localApi.js";
 
-export const api = axios.create({
-  baseURL: "/api",
-  withCredentials: true
-});
+export const isFirebaseMode = import.meta.env.VITE_DATA_BACKEND === "firebase";
+export const api = isFirebaseMode ? firebaseApi : localApi;
 
 export function fileUrl(submissionId, file = "archive") {
-  return `/api/submissions/${submissionId}/download?file=${file}`;
+  return isFirebaseMode ? firebaseFileUrl(submissionId, file) : localFileUrl(submissionId, file);
 }
 
 export function adminFileUrl(path) {
-  return `/api/admin${path}`;
+  return isFirebaseMode ? firebaseAdminFileUrl(path) : localAdminFileUrl(path);
 }
 
 export function formatDate(value) {
@@ -46,4 +45,3 @@ export function statusLabel(status) {
     closed: "제출 마감"
   }[status] || status || "-";
 }
-

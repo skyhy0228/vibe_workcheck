@@ -1,0 +1,68 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+    function signedIn() {
+      return request.auth != null;
+    }
+
+    function userDoc() {
+      return get(/databases/$(database)/documents/users/$(request.auth.uid));
+    }
+
+    function isProfessor() {
+      return signedIn() && userDoc().data.role == "professor";
+    }
+
+    function isOwner(userId) {
+      return signedIn() && request.auth.uid == userId;
+    }
+
+    match /users/{userId} {
+      allow read: if isProfessor() || isOwner(userId);
+      allow create: if isOwner(userId);
+      allow update, delete: if isProfessor();
+    }
+
+    match /assignments/{assignmentId} {
+      allow read: if signedIn();
+      allow write: if isProfessor();
+    }
+
+    match /submissions/{submissionId} {
+      allow read: if isProfessor() || isOwner(resource.data.user_id);
+      allow create: if signedIn() && request.resource.data.user_id == request.auth.uid;
+      allow update: if isProfessor();
+      allow delete: if isProfessor();
+    }
+
+    match /assignment_extensions/{extensionId} {
+      allow read: if isProfessor() || isOwner(resource.data.user_id);
+      allow write: if isProfessor();
+    }
+
+    match /notices/{noticeId} {
+      allow read: if signedIn();
+      allow write: if isProfessor();
+    }
+
+    match /assignment_qna/{qnaId} {
+      allow read: if signedIn();
+      allow create: if signedIn();
+      allow update, delete: if isProfessor();
+    }
+
+    match /submission_comments/{commentId} {
+      allow read: if isProfessor() || isOwner(resource.data.user_id);
+      allow create: if signedIn();
+      allow update, delete: if isProfessor();
+    }
+
+    match /audit_logs/{logId} {
+      allow read: if isProfessor();
+      allow create: if signedIn();
+      allow update, delete: if false;
+    }
+  }
+}
+

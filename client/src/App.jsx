@@ -25,9 +25,17 @@ import {
   Upload,
   Users
 } from "lucide-react";
-import { adminFileUrl, api, fileUrl, formatBytes, formatDate, statusLabel } from "./services/api.js";
+import { adminFileUrl, api, fileUrl, formatBytes, formatDate, isFirebaseMode, statusLabel } from "./services/api.js";
+import { downloadCsvFromRows, downloadZipFromRows } from "./services/firebaseApi.js";
 
 const RouterContext = createContext(null);
+const useHashRouter = import.meta.env.VITE_ROUTER_MODE === "hash";
+
+function currentPath() {
+  if (!useHashRouter) return window.location.pathname;
+  const hashPath = window.location.hash.replace(/^#/, "");
+  return hashPath || "/";
+}
 
 function useRouter() {
   return useContext(RouterContext);
@@ -37,7 +45,7 @@ function Link({ to, children, ...props }) {
   const { navigate } = useRouter();
   return (
     <a
-      href={to}
+      href={useHashRouter ? `#${to}` : to}
       onClick={(event) => {
         event.preventDefault();
         navigate(to);
@@ -415,6 +423,20 @@ function AssignmentDetail({ showToast, id, user }) {
     }
   };
 
+  const downloadReadmeTemplate = async (event) => {
+    if (!isFirebaseMode) return;
+    event.preventDefault();
+    const { data } = await api.get(`/assignments/${id}/readme-template`);
+    const url = URL.createObjectURL(new Blob([data], { type: "text/plain;charset=utf-8" }));
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = "README.txt";
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    URL.revokeObjectURL(url);
+  };
+
   if (!assignment) return <div className="loading">과제 정보를 불러오는 중...</div>;
   const closed = assignment.is_closed;
   const latest = submissions[0];
@@ -438,7 +460,7 @@ function AssignmentDetail({ showToast, id, user }) {
         </article>
         <article className="panel upload-panel">
           <h2>과제 제출</h2>
-          <a className="mini-btn" href={`/api/assignments/${id}/readme-template`}><Download size={15} /> README 템플릿</a>
+          <a className="mini-btn" href={`/api/assignments/${id}/readme-template`} onClick={downloadReadmeTemplate}><Download size={15} /> README 템플릿</a>
           <div
             className={`drop-zone ${archive ? "ready" : ""}`}
             onClick={() => fileInput.current?.click()}
@@ -486,8 +508,8 @@ function AssignmentDetail({ showToast, id, user }) {
                   <td><span className={`badge ${item.is_late ? "late" : item.version > 1 ? "resubmitted" : "submitted"}`}>{statusLabel(item.is_late ? "late" : item.version > 1 ? "resubmitted" : "submitted")}</span></td>
                   <td>{item.score ?? "-"}</td>
                   <td className="actions">
-                    <a className="icon-btn" href={fileUrl(item.id)} title="압축파일 다운로드"><Download size={17} /></a>
-                    {item.readme_original_filename && <a className="icon-btn" href={fileUrl(item.id, "readme")} title="README 다운로드"><FileText size={17} /></a>}
+                    <a className="icon-btn" href={item.download_url || fileUrl(item.id)} title="압축파일 다운로드"><Download size={17} /></a>
+                    {item.readme_original_filename && <a className="icon-btn" href={item.readme_download_url || fileUrl(item.id, "readme")} title="README 다운로드"><FileText size={17} /></a>}
                     {item.readme_original_filename && <button className="icon-btn" onClick={() => previewReadme(item.id)} title="README 미리보기"><Eye size={17} /></button>}
                   </td>
                 </tr>
@@ -751,6 +773,19 @@ function AdminAssignmentStatus({ id, showToast }) {
     setQna(qnaRes.data.qna);
   };
 
+  const downloadCsv = async (event) => {
+    if (!isFirebaseMode) return;
+    event.preventDefault();
+    await downloadCsvFromRows(data.assignment, rows);
+  };
+
+  const downloadZip = async (event) => {
+    if (!isFirebaseMode) return;
+    event.preventDefault();
+    showToast("전체 제출 파일 ZIP을 생성하는 중입니다.", "info");
+    await downloadZipFromRows(data.assignment, rows);
+  };
+
   const rows = useMemo(() => {
     const list = data?.rows || [];
     return list
@@ -796,8 +831,8 @@ function AdminAssignmentStatus({ id, showToast }) {
             <option value="submitted_at">제출시간순</option>
             <option value="status">상태순</option>
           </select>
-          <a className="secondary compact-btn" href={adminFileUrl(`/assignments/${id}/submissions.csv`)}>CSV</a>
-          <a className="primary compact-btn" href={adminFileUrl(`/assignments/${id}/download-all`)}><Download size={17} /> 전체 ZIP</a>
+          <a className="secondary compact-btn" href={adminFileUrl(`/assignments/${id}/submissions.csv`)} onClick={downloadCsv}>CSV</a>
+          <a className="primary compact-btn" href={adminFileUrl(`/assignments/${id}/download-all`)} onClick={downloadZip}><Download size={17} /> 전체 ZIP</a>
         </div>
         <div className="table-wrap">
           <table>
@@ -814,8 +849,8 @@ function AdminAssignmentStatus({ id, showToast }) {
                   <td>{submission?.readme_original_filename || "-"}</td>
                   <td>{submission?.score ?? "-"}</td>
                   <td className="actions">
-                    {submission && <a className="icon-btn" href={fileUrl(submission.id)}><Download size={17} /></a>}
-                    {submission?.readme_original_filename && <a className="icon-btn" href={fileUrl(submission.id, "readme")}><FileText size={17} /></a>}
+                    {submission && <a className="icon-btn" href={submission.download_url || fileUrl(submission.id)}><Download size={17} /></a>}
+                    {submission?.readme_original_filename && <a className="icon-btn" href={submission.readme_download_url || fileUrl(submission.id, "readme")}><FileText size={17} /></a>}
                     {submission && <button className="mini-btn" onClick={() => setReviewRow({ student, submission })}>검토</button>}
                     <button className="mini-btn" onClick={() => saveExtension(student.id)}><Clock size={14} /> 연장</button>
                     {extension && <button className="mini-btn" onClick={() => removeExtension(student.id)}>연장취소</button>}
@@ -941,18 +976,29 @@ export default function App() {
   const { user, setUser, loading } = useAuth();
   const [toast, setToast] = useState(null);
   const showToast = (message, type = "info") => setToast({ message, type });
-  const [path, setPath] = useState(window.location.pathname);
+  const [path, setPath] = useState(currentPath());
 
   useEffect(() => {
-    const onPopState = () => setPath(window.location.pathname);
+    const onPopState = () => setPath(currentPath());
     window.addEventListener("popstate", onPopState);
-    return () => window.removeEventListener("popstate", onPopState);
+    window.addEventListener("hashchange", onPopState);
+    return () => {
+      window.removeEventListener("popstate", onPopState);
+      window.removeEventListener("hashchange", onPopState);
+    };
   }, []);
 
   const router = useMemo(() => ({
     path,
     navigate: (to, options = {}) => {
-      if (window.location.pathname === to) return;
+      if (currentPath() === to) return;
+      if (useHashRouter) {
+        if (options.replace) window.location.replace(`#${to}`);
+        else window.location.hash = to;
+        setPath(to);
+        window.scrollTo({ top: 0, behavior: "auto" });
+        return;
+      }
       const method = options.replace ? "replaceState" : "pushState";
       window.history[method]({}, "", to);
       setPath(to);
@@ -960,8 +1006,8 @@ export default function App() {
     }
   }), [path]);
 
-  const studentAssignmentMatch = path.match(/^\/student\/assignments\/(\d+)$/);
-  const adminAssignmentMatch = path.match(/^\/admin\/assignments\/(\d+)$/);
+  const studentAssignmentMatch = path.match(/^\/student\/assignments\/([^/]+)$/);
+  const adminAssignmentMatch = path.match(/^\/admin\/assignments\/([^/]+)$/);
 
   let page;
   if (path === "/") {
