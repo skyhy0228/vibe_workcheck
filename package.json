@@ -1,0 +1,19 @@
+{
+  "name": "knut-assignment-system",
+  "version": "1.0.0",
+  "private": true,
+  "description": "국립한국교통대학교 과제제출시스템",
+  "scripts": {
+    "install:all": "npm install && npm install --prefix server && npm install --prefix client",
+    "dev": "concurrently -n API,WEB -c red,cyan \"npm run dev --prefix server\" \"npm run dev --prefix client\"",
+    "build": "npm run build --prefix client",
+    "start": "npm run build && cross-env SERVE_CLIENT=true SERVER_PORT=228 node server/src/index.js",
+    "seed": "npm run seed --prefix server",
+    "smoke": "node scripts/smoke-test.mjs",
+    "smoke:features": "node scripts/feature-smoke.mjs"
+  },
+  "devDependencies": {
+    "concurrently": "^9.0.1",
+    "cross-env": "^7.0.3"
+  }
+}

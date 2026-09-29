@@ -1,0 +1,11 @@
+node_modules/
+client/dist/
+.env
+data/database/*.sqlite
+data/database/*.sqlite-*
+data/database/*.db
+data/database/*.db-*
+data/submissions/
+firebase-service-account*.json
+serviceAccountKey*.json
+npm-debug.log*
