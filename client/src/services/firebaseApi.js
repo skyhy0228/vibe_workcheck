@@ -414,8 +414,16 @@ async function handlePost(url, data, config = {}) {
   match = url.match(/^\/submissions\/([^/]+)\/comments$/);
   if (match) {
     const profile = await requireProfile();
+    const submissionSnap = await getDoc(doc(firestore, "submissions", match[1]));
+    if (!submissionSnap.exists()) throw new Error("제출물을 찾을 수 없습니다.");
+    const submission = submissionSnap.data();
+    if (profile.role === "student" && submission.user_id !== profile.id) {
+      throw new Error("댓글을 작성할 권한이 없습니다.");
+    }
     const item = {
       submission_id: match[1],
+      submission_owner_id: submission.user_id,
+      assignment_id: submission.assignment_id,
       user_id: profile.id,
       body: String(data.body || "").trim(),
       visibility: profile.role === "professor" && data.visibility === "private" ? "private" : "shared",

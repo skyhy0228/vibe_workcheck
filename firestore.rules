@@ -53,8 +53,15 @@ service cloud.firestore {
     }
 
     match /submission_comments/{commentId} {
-      allow read: if isProfessor() || isOwner(resource.data.user_id);
-      allow create: if signedIn();
+      allow read: if isProfessor()
+        || isOwner(resource.data.user_id)
+        || (resource.data.visibility == "shared" && isOwner(resource.data.submission_owner_id));
+      allow create: if signedIn()
+        && request.resource.data.user_id == request.auth.uid
+        && (
+          isProfessor()
+          || request.resource.data.submission_owner_id == request.auth.uid
+        );
       allow update, delete: if isProfessor();
     }
 
@@ -65,4 +72,3 @@ service cloud.firestore {
     }
   }
 }
-
